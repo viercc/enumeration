@@ -63,6 +63,7 @@ module Data.CoEnumeration
   , finiteFunctionOf
 
     -- * Utilities
+  , undiagonal
   , unList, unSet
   ) where
 
@@ -75,8 +76,6 @@ import Data.Functor.Contravariant
 import Data.Functor.Contravariant.Divisible(lost, Divisible(..), Decidable(..))
 
 import Data.Enumeration (Index, Cardinality(..))
-import Data.Enumeration.Invertible (undiagonal)
-
 
 ------------------------------------------------------------
 -- Setup for doctest examples
@@ -255,6 +254,20 @@ rat = contramap caseBySign $ maybeOf (cw <+> cw)
 -- | Sets the cardinality of given coenumeration to 'Infinite'
 infinite :: CoEnumeration a -> CoEnumeration a
 infinite e = e{ card = Infinite }
+
+-- | The other half of the isomorphism between \(\mathbb{N}\) and
+--   \(\mathbb{N} \times \mathbb{N}\) which enumerates by diagonals:
+--   turn a pair of natural numbers giving a position in the 2D grid
+--   into the number in the cell, according to this numbering scheme:
+--
+--   @
+--   0 1 3 6 ...
+--   2 4 7
+--   5 8
+--   9
+--   @
+undiagonal :: (Integer, Integer) -> Integer
+undiagonal (r,c) = (r+c) * (r+c+1) `div` 2 + r
 
 -- | Cartesian product of coenumeration, made to be an inverse of
 --   cartesian product of enumeration '(E.><)'.

@@ -75,7 +75,6 @@ module Data.Enumeration.Invertible
 
   -- * Utilities
 
-  , undiagonal
   ) where
 
 import           Control.Applicative (Alternative (..))
@@ -86,6 +85,8 @@ import           Data.Ratio
 
 import           Data.Enumeration    (Cardinality (..), Enumeration, Index)
 import qualified Data.Enumeration    as E
+import           Data.CoEnumeration    (CoEnumeration)
+import qualified Data.CoEnumeration    as C
 
 ------------------------------------------------------------
 -- Setup for doctest examples
@@ -454,7 +455,7 @@ interleave e = IEnumeration
       let i = locate (select e j) a
       in  case card e of
             Finite n -> i*n + j
-            Infinite -> undiagonal (i,j)
+            Infinite -> C.undiagonal (i,j)
   }
 
 -- | Zip two enumerations in parallel, producing the pair of
@@ -514,20 +515,6 @@ a <+> b = IEnumeration (Left <$> baseEnum a <|> Right <$> baseEnum b) (locateEit
       _              -> either ((*2) . locate a) (succ . (*2) . locate b)
 
 
--- | The other half of the isomorphism between \(\mathbb{N}\) and
---   \(\mathbb{N} \times \mathbb{N}\) which enumerates by diagonals:
---   turn a pair of natural numbers giving a position in the 2D grid
---   into the number in the cell, according to this numbering scheme:
---
---   @
---   0 1 3 6 ...
---   2 4 7
---   5 8
---   9
---   @
-undiagonal :: (Integer, Integer) -> Integer
-undiagonal (r,c) = (r+c) * (r+c+1) `div` 2 + r
-
 -- | Cartesian product of enumerations. If both are finite, uses a
 --   simple lexicographic ordering.  If only one is finite, the
 --   resulting enumeration is still in lexicographic order, with the
@@ -560,7 +547,7 @@ a >< b = IEnumeration (baseEnum a E.>< baseEnum b) (locatePair a b)
     locatePair a b = case (card a, card b) of
       (_, Finite k2) -> \(x,y) -> k2 * locate a x + locate b y
       (Finite k1, _) -> \(x,y) -> k1 * locate b y + locate a x
-      _              -> \(x,y) -> undiagonal (locate a x, locate b y)
+      _              -> \(x,y) -> C.undiagonal (locate a x, locate b y)
 
 ------------------------------------------------------------
 -- Building standard data types
