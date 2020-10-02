@@ -33,7 +33,7 @@ module Data.ProEnumeration(
   
   , isFinite
   , baseEnum, baseCoEnum, run
-  , enumerateRange
+  , enumerate
 
   , unsafeMkProEnumeration
   , mkProEnumeration
@@ -48,12 +48,13 @@ module Data.ProEnumeration(
   , unit, empty
   , singleton
   , modulo, clamped, boundsChecked
-  , finiteList, finiteCycle
+  , safeIndex, cycleEnum, fromCoEnum
   , boundedEnum
   , nat, int, cw, rat
 
   -- * Combinators
   , infinite
+  , takeP, dropP
   , compose
   , (><), (<+>)
   , maybeOf, eitherOf
@@ -147,9 +148,9 @@ run p = select p . locate p
 
 -- * Primitive proenumerations
 
--- | @enumerateRange = E.enumerate . 'baseEnum'@
-enumerateRange :: ProEnumeration a b -> [b]
-enumerateRange = E.enumerate . baseEnum
+-- | @enumerate = E.enumerate . 'baseEnum'@
+enumerate :: ProEnumeration a b -> [b]
+enumerate = E.enumerate . baseEnum
 
 -- | Constructs a proenumeration from a 'CoEnumeration' and an 'Enumeration'.
 --
@@ -211,6 +212,35 @@ boundedEnum = mkProEnumeration C.boundedEnum E.boundedEnum
 modulo :: Integer -> ProEnumeration Integer Integer
 modulo k = mkProEnumeration (C.modulo k) (E.finite k)
 
+-- | Take a finite prefix from the beginning of a proenumeration.
+--
+--   **It is error to take zero** from nonempty proenumeration,
+--   unlike 'E.takeE'.
+--
+-- >>> enumerate $ takeP 3 (boundedEnum @Int)
+-- [-9223372036854775808,-9223372036854775807,-9223372036854775806]
+-- >>> enumerate $ takeP 2 (clamped 1 5)
+-- [1,2]
+-- >>> enumerate $ takeP 3 (clamped 1 5)
+-- [1,2,3]
+-- >>> enumerate $ takeP 7 (clamped 1 5)
+-- [1,2,3,4,5]
+takeP :: Integer -> ProEnumeration a b -> ProEnumeration a b
+takeP k p = mkProEnumeration (C.takeC k (baseCoEnum p)) (E.takeE k (baseEnum p))
+
+-- | Drop some elements from the beginning of a proenumeration.  @dropE k
+--   e@ yields @e@ unchanged if \(k \leq 0\).
+--
+--   **It is error** to drop all or more number of elements from a nonempty proenumeration,
+--   in other words, it is error to turn nonempty into empty by dropping everything.
+--
+-- >>> enumerate $ dropP 2 (clamped 1 5)
+-- [3,4,5]
+-- >>> enumerate $ dropP 0 (clamped 1 5)
+-- [1,2,3,4,5]
+dropP :: Integer -> ProEnumeration a b -> ProEnumeration a b
+dropP k p = mkProEnumeration (C.dropC k (baseCoEnum p)) (E.dropE k (baseEnum p))
+
 -- | @clamped lo hi@ is a proenumeration of integers,
 --   which does not modify integers between @lo@ and @hi@, inclusive,
 --   and limits smaller (larger) integer to @lo@ (@hi@).
@@ -221,7 +251,7 @@ modulo k = mkProEnumeration (C.modulo k) (E.finite k)
 --
 -- >>> card (clamped (-2) 2)
 -- Finite 5
--- >>> enumerateRange (clamped (-2) 2)
+-- >>> enumerate (clamped (-2) 2)
 -- [-2,-1,0,1,2]
 -- >>> run (clamped (-2) 2) <$> [-4 .. 4]
 -- [-2,-2,-2,-1,0,1,2,2,2]
@@ -244,9 +274,9 @@ clamped lo hi
 --
 -- >>> card (boundsChecked (-2) 2)
 -- Finite 6
--- >>> -- Justs of [-2 .. 2] and Nothing
--- >>> enumerateRange (boundsChecked (-2) 2)
--- [Just (-2),Just (-1),Just 0,Just 1,Just 2,Nothing]
+-- >>> -- Nothing and Justs of [-2 .. 2]
+-- >>> enumerate (boundsChecked (-2) 2)
+-- [Nothing,Just (-2),Just (-1),Just 0,Just 1,Just 2]
 -- >>> run (boundsChecked (-2) 2) <$> [-4 .. 4]
 -- [Nothing,Nothing,Just (-2),Just (-1),Just 0,Just 1,Just 2,Nothing,Nothing]
 boundsChecked :: Integer -> Integer -> ProEnumeration Integer (Maybe Integer)
@@ -259,56 +289,61 @@ boundsChecked lo hi = ProEnumeration
     n = 1 + hi - lo
     size = 1 + max 0 n
     sel i
-      | 0 <= i && i < n = Just (i + lo)
-      | i == n          = Nothing
+      | i == 0           = Nothing
+      | 1 <= i && i <= n = Just (i - 1 + lo)
       | otherwise = error "out of bounds"
-    loc k | lo <= k && k <= hi = k - lo
-          | otherwise          = n
+    loc k | lo <= k && k <= hi = k - lo + 1
+          | otherwise          = 0
 
-
--- | @finiteList as@ is a proenumeration of \"bounds checked\"
+-- | @safeIndex as@ is a proenumeration of \"bounds checked\"
 --   indexing of @as@.
 --   
 --   > run (finiteList as) i
---       | 0 <= i && i < length as = Just (as !! i)
+--       | 0 <= i && i < length as = Just (select as i)
 --       | otherwise               = Nothing
---
---   Note that 'finiteList' uses '!!' on the input list
---   under the hood, which have bad performance for longer list.
---   See the documentation of Data.Enumeration.'E.finiteList' too.
--- >>> card (finiteList "HELLO")
--- Finite 6
--- >>> -- Justs and Nothing
--- >>> enumerateRange (finiteList "HELLO")
--- [Just 'H',Just 'E',Just 'L',Just 'L',Just 'O',Nothing]
--- >>> run (finiteList "HELLO") <$> [0 .. 6]
--- [Just 'H',Just 'E',Just 'L',Just 'L',Just 'O',Nothing,Nothing]
-finiteList :: [a] -> ProEnumeration Integer (Maybe a)
-finiteList as = boundsChecked 0 (n-1) @. (fmap sel)
-  where
-    as' = E.finiteList as
-    Finite n = E.card as'
-    sel = E.select as'
-
--- | @finiteCycle as@ is a proenumeration of indexing of @as@,
---   where every integer is valid index by taking modulo @length as@.
 --   
---   > run (finiteCycle as) i = as !! (i `mod` length as)
---
---   If @as@ is an empty list, it is an error.
---
--- >>> card (finiteCycle "HELLO")
--- Finite 5
--- >>> enumerateRange (finiteCycle "HELLO")
--- "HELLO"
--- >>> run (finiteCycle "HELLO") <$> [0 .. 10]
--- "HELLOHELLOH"
-finiteCycle :: [a] -> ProEnumeration Integer a
-finiteCycle as = modulo n @. sel
+-- >>> card (safeIndex (E.finiteList "HELLO"))
+-- Finite 6
+-- >>> -- Nothing and Justs
+-- >>> enumerate (safeIndex (E.finiteList "HELLO"))
+-- [Nothing,Just 'H',Just 'E',Just 'L',Just 'L',Just 'O']
+-- >>> run (safeIndex (E.finiteList "HELLO")) <$> [0 .. 6]
+-- [Just 'H',Just 'E',Just 'L',Just 'L',Just 'O',Nothing,Nothing]
+safeIndex :: Enumeration a -> ProEnumeration Integer (Maybe a)
+safeIndex as = case E.card as of
+  Finite n -> boundsChecked 0 (n-1) @. fmap (E.select as)
+  Infinite -> ProEnumeration{ card = Infinite, select = sel, locate = nonneg }
   where
-    as' = E.finiteList as
-    Finite n = E.card as'
-    sel = E.select as'
+    sel i | i == 0 = Nothing
+          | i > 0  = Just (E.select as (i-1))
+          | otherwise = error "out of bounds"
+    
+    nonneg i = if i >= 0 then i + 1 else 0
+
+-- | @cycleEnum as@ is a proenumeration of indexing of @as@,
+--   where every integer is valid index. This is done by
+--   
+--   * Taking modulo @card as@ if @card as@ is finite
+--   * Taking absolute value if @card as@ is infinite
+--   
+--   If @as@ is an empty enumeration, it is an error.
+--
+-- >>> card (cycleEnum (E.finiteList "HELLO"))
+-- Finite 5
+-- >>> card (cycleEnum E.cw)
+-- Infinite
+-- >>> run (cycleEnum (E.finiteList "HELLO")) <$> [0 .. 10]
+-- "HELLOHELLOH"
+cycleEnum :: Enumeration a -> ProEnumeration Integer a
+cycleEnum as = case E.card as of
+  Finite n -> mkProEnumeration (C.modulo n) as
+  Infinite -> mkProEnumeration C.nat as
+
+-- | Turn a coenumeration into a proenumeration
+--   by treating the bare indices 'C.locate' returns
+--   as its output elements.
+fromCoEnum :: CoEnumeration a -> ProEnumeration a Integer
+fromCoEnum as = mkProEnumeration as E.nat
 
 -- | @nat = 'mkProEnumeration' C.'C.nat' E.'E.nat'@
 nat :: ProEnumeration Integer Integer
@@ -421,12 +456,13 @@ finiteSubsetOf p =
 enumerateP :: CoEnumeration a -> Enumeration b -> Enumeration (ProEnumeration a b)
 enumerateP a b = case (C.card a, E.card b) of
   (0, _) -> E.singleton (mkProEnumeration a Ap.empty)
+  (_, 0) -> Ap.empty
   (_, 1) -> E.singleton (mkProEnumeration C.unit b)
   (Finite k,_) -> mkProEnumeration a <$> E.finiteEnumerationOf (fromInteger k) b
   (Infinite,_) -> error "infinite domain"
 
 -- | Coenumerate every possible functions.
---
+-- 
 -- For @coenumerateP as bs@, it classifies functions of type @a -> b@
 -- by the following criteria:
 -- 
@@ -446,6 +482,7 @@ enumerateP a b = case (C.card a, E.card b) of
 coenumerateP :: Enumeration a -> CoEnumeration b -> CoEnumeration (a -> b)
 coenumerateP a b = case (E.card a, C.card b) of
   (0, _) -> C.unit
+  (_, 0) -> C.unsafeMkCoEnumeration 0 (\_ -> error "Uninhabited function?")
   (_, 1) -> C.unit
   (Finite k,_) -> contramap (\f -> f . E.select a) $ C.finiteFunctionOf k b
   (Infinite,_) -> error "infinite domain"

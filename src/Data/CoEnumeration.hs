@@ -59,6 +59,7 @@ module Data.CoEnumeration
   , takeC, dropC, modulo, overlayC
   , infinite
   , (><), (<+>)
+  , findIndexIn
   , maybeOf, eitherOf, listOf, finiteSubsetOf
   , finiteFunctionOf
 
@@ -69,13 +70,15 @@ module Data.CoEnumeration
 
 import Data.Void
 import Data.Bits
-import Data.List (foldl')
+import Data.List (foldl', findIndex)
 import Data.Ratio
 
 import Data.Functor.Contravariant
 import Data.Functor.Contravariant.Divisible(lost, Divisible(..), Decidable(..))
 
 import Data.Enumeration (Index, Cardinality(..))
+
+import qualified Data.Enumeration as E
 
 ------------------------------------------------------------
 -- Setup for doctest examples
@@ -355,6 +358,33 @@ modulo :: Integer -> CoEnumeration Integer
 modulo n
   | n <= 0    = error $ "modulo: invalid argument " ++ show n
   | otherwise = CoEnumeration{ card = Finite n, locate = (`mod` n) }
+
+-- | For a finite list @as :: [a]@, 'findIndexIn' @as@ returns coenumeration
+--   on type @a@ with cardinality @N + 1@, where @N@ is the length of the list.
+--
+--   For an input value, the returned coenumeration assigns **1 plus** the index
+--   of the first occurrence of the given value in the list.
+--   
+--   If the input value does not occur in the list,
+--   this coenumeration assigns @0@ to that value.
+--   
+-- >>> card (findIndexIn "banana")
+-- Finite 7
+-- >>> locate (findIndexIn "banana") <$> "XbananaX"
+-- [0,1,2,3,2,3,2,0]
+
+--   The purpose of this behavior is to be able to get the value again by
+--   @'E.maybeOf' ('E.finiteList' as)@.
+--  
+-- >>> let e = E.maybeOf (E.finiteList "banana")
+-- >>> let c = findIndexIn "banana"
+-- >>> (E.select e . locate c) <$> "XbananaX"
+-- [Nothing,Just 'b',Just 'a',Just 'n',Just 'a',Just 'n',Just 'a',Nothing]
+findIndexIn :: Eq a => [a] -> CoEnumeration a
+findIndexIn as = CoEnumeration{ card = Finite (n+1), locate = loc }
+  where
+    n = toInteger (length as)
+    loc a = maybe 0 (succ . toInteger) $ findIndex (==a) as
 
 -- | @overlayC a b@ combines two coenumerations in parallel, sharing
 --   indices of two coenumerations.
