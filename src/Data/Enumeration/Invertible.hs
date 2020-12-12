@@ -167,12 +167,15 @@ void = Data.ProEnumeration.empty
 --
 -- >>> enumerate (finite 5)
 -- [0,1,2,3,4]
--- 
--- >>> enumerate (finite 0)
--- []
---
 -- >>> locate (finite 5) 2
 -- 2
+--
+-- Unlike @E.finite@, trying to make invertible enumeration of 0
+-- natural numbers is error.
+-- 
+-- >>> import Control.Exception
+-- >>> print (enumerate (finite 0)) `catch` (\(ErrorCall s) -> putStrLn s)
+-- modulo: invalid argument 0
 finite :: Integer -> IEnumeration Integer
 finite = modulo
 
